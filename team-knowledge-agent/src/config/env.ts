@@ -29,6 +29,7 @@ const envSchema = z
 
     PORT: z.coerce.number().int().positive().default(3000),
     LOG_LEVEL: z.string().optional(),
+    API_AUTH_TOKEN: z.string().min(1, "API_AUTH_TOKEN is required"),
   })
   .passthrough();
 

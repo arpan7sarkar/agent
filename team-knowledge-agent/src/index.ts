@@ -1,52 +1,48 @@
-import crypto from "node:crypto";
+import type { Server } from "node:http";
+import { startApiServer } from "./api/server.js";
 import { getEnv } from "./config/env.js";
 import { closePostgres } from "./db/postgres.js";
-import { runAgent } from "./openai/runner.js";
 import { logger, newCorrelationId, withBindings } from "./config/logger.js";
 import { getCivicClient } from "./civic/client.js";
-
-function parseMessageFromArgs(): string {
-  return process.argv.slice(2).join(" ").trim();
-}
 
 async function main(): Promise<void> {
   const env = getEnv();
   const correlationId = newCorrelationId();
   const log = withBindings({ correlationId });
   const civicClient = getCivicClient();
+  let server: Server | null = null;
 
   log.info(
     { port: env.PORT, openaiModel: env.OPENAI_MODEL },
     "Main agent runtime booted",
   );
   log.info(civicClient.getRuntimeInfo(), "Civic MCP integration initialized");
+  const started = await startApiServer();
+  server = started.server;
 
-  const message = parseMessageFromArgs();
-  if (!message) {
-    log.info(
-      "Runtime is ready. Pass a message to run once, example: npm run dev -- \"How do we deploy?\"",
-    );
-    return;
-  }
+  const shutdown = async (signal: string) => {
+    log.info({ signal }, "Shutting down runtime");
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server?.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+      server = null;
+    }
+    await closePostgres();
+  };
 
-  const result = await runAgent({
-    userId: process.env.DEMO_USER_ID ?? "00000000-0000-0000-0000-000000000001",
-    conversationId:
-      process.env.DEMO_CONVERSATION_ID ?? "00000000-0000-0000-0000-000000000001",
-    message,
-    requestId: crypto.randomUUID(),
-    correlationId,
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT").then(() => process.exit(0));
   });
-
-  log.info(
-    {
-      traceId: result.traceId,
-      sessionId: result.sessionId,
-      route: result.route,
-      response: result.response,
-    },
-    "Agent run result",
-  );
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM").then(() => process.exit(0));
+  });
 }
 
 main()
@@ -55,5 +51,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await closePostgres();
+    // Keep process alive while API server is running.
   });
