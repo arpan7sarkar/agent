@@ -154,6 +154,10 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
       reason: decision.reason,
       modelRequestId: decision.modelRequestId,
     });
+    await appendAuditEvent("handoff_dispatched", traceId, request.userId, {
+      route: decision.route,
+      handoffReason: decision.reason,
+    });
 
     const specialist = specialistHandlers[decision.route];
     const specialistResult = await specialist({
@@ -167,6 +171,11 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     const response = specialistResult.skipRouterSummary
       ? specialistResult.specialistOutput
       : await summarizeHandoff(decision.route, specialistResult.specialistOutput);
+    await appendAuditEvent("handoff_completed", traceId, request.userId, {
+      route: decision.route,
+      specialistOutputLength: specialistResult.specialistOutput.length,
+      sourceReferenceCount: specialistResult.sourceReferences?.length ?? 0,
+    });
 
     const turns = Array.isArray(sessionState.turns) ? sessionState.turns : [];
     const nextState: SessionState = {

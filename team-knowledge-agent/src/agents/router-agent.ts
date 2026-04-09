@@ -30,9 +30,25 @@ Valid routes:
 - approval: request/review approval decisions
 - write: execute an already-approved external write
 
+Routing policy:
+- Stay narrow and route only; never perform specialist work.
+- Do not improvise missing capabilities.
+- Prefer delegation over explanation.
+- Route to "write" only when the request clearly references an already-approved action.
+- If a write is requested without clear approval evidence, route to "approval".
+
 Output JSON only in this exact shape:
 {"route":"qa|indexer|staleness|approval|write","reason":"short reason"}
 `;
+
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+  return text.slice(start, end + 1);
+}
 
 function normalizeRoute(value: string): RouterRoute | null {
   const lower = value.trim().toLowerCase();
@@ -44,7 +60,8 @@ function normalizeRoute(value: string): RouterRoute | null {
 
 function parseDecision(text: string): RouterDecision | null {
   try {
-    const parsed = JSON.parse(text) as { route?: string; reason?: string };
+    const raw = extractJsonObject(text) ?? text;
+    const parsed = JSON.parse(raw) as { route?: string; reason?: string };
     const route = parsed.route ? normalizeRoute(parsed.route) : null;
     if (!route) return null;
     return {
@@ -54,6 +71,35 @@ function parseDecision(text: string): RouterDecision | null {
   } catch {
     return null;
   }
+}
+
+function hasApprovedWriteSignal(message: string): boolean {
+  const input = message.toLowerCase();
+  const hasApprovalKeyword =
+    /\b(already approved|approval id|approved request|request id|approval_request_id)\b/.test(
+      input,
+    );
+  const hasDecisionKeyword = /\b(approved|execute approved|run approved)\b/.test(input);
+  const hasRequestId = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(
+    message,
+  );
+  return (hasApprovalKeyword || hasDecisionKeyword) && hasRequestId;
+}
+
+function applyRoutePolicy(message: string, decision: RouterDecision): RouterDecision {
+  if (decision.route !== "write") {
+    return decision;
+  }
+
+  if (hasApprovedWriteSignal(message)) {
+    return decision;
+  }
+
+  return {
+    route: "approval",
+    reason:
+      "Write-like request detected without clear approved request evidence; routed to approval gate.",
+  };
 }
 
 function keywordFallback(message: string): RouterDecision {
@@ -69,7 +115,13 @@ function keywordFallback(message: string): RouterDecision {
     return { route: "approval", reason: "User asked for approval flow handling." };
   }
   if (/\b(execute|apply|update|write|publish)\b/.test(input)) {
-    return { route: "write", reason: "User asked to perform a write-style action." };
+    if (hasApprovedWriteSignal(message)) {
+      return { route: "write", reason: "User requested execution of an already-approved write." };
+    }
+    return {
+      route: "approval",
+      reason: "Write-like request without clear approval evidence; routed to approval first.",
+    };
   }
 
   return { route: "qa", reason: "Default route for general knowledge Q&A." };
@@ -79,10 +131,11 @@ export async function classifyRequest(userMessage: string): Promise<RouterDecisi
   const result = await generateText(routerInstructions, userMessage);
   const parsed = parseDecision(result.text);
   if (parsed) {
+    const policyAdjusted = applyRoutePolicy(userMessage, parsed);
     if (result.requestId) {
-      return { ...parsed, modelRequestId: result.requestId };
+      return { ...policyAdjusted, modelRequestId: result.requestId };
     }
-    return parsed;
+    return policyAdjusted;
   }
   return keywordFallback(userMessage);
 }
