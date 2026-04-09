@@ -12,6 +12,13 @@ const envSchema = z
 
     CIVIC_TOKEN: z.string().min(1, "CIVIC_TOKEN is required"),
     CIVIC_PROFILE_ID: z.string().min(1, "CIVIC_PROFILE_ID is required"),
+    CIVIC_BASE_URL: z.string().default("https://app.civic.com/hub/mcp"),
+    CIVIC_LOCK_PROFILE: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((value) => value !== "false"),
+    CIVIC_SLACK_WRITE_CHANNEL: z.string().optional(),
+    CIVIC_NOTION_WRITE_PAGE_IDS: z.string().optional(),
 
     PINECONE_API_KEY: z.string().min(1, "PINECONE_API_KEY is required"),
     PINECONE_INDEX: z.string().min(1, "PINECONE_INDEX is required"),
