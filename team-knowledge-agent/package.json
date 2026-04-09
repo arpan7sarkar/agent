@@ -1,6 +1,7 @@
 {
   "name": "team-knowledge-agent",
   "version": "1.0.0",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx src/index.ts",
