@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import {
+  parseApprovalMessageToRequest,
+  runApprovalAgent,
+} from "../agents/approval-agent.js";
+import {
   parseIndexerMessageToRequest,
   runIndexerAgent,
 } from "../agents/indexer-agent.js";
@@ -84,11 +88,13 @@ const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
       specialistOutput: stalenessResult.summary,
     };
   },
-  approval: async () =>
-    ({
-      specialistOutput:
-        "Approval specialist placeholder: durable approval flow will be added in later steps.",
-    }),
+  approval: async ({ message, userId }) => {
+    const approvalRequest = parseApprovalMessageToRequest(userId, message);
+    const approvalResult = await runApprovalAgent(approvalRequest);
+    return {
+      specialistOutput: approvalResult.summary,
+    };
+  },
   write: async () =>
     ({
       specialistOutput:
