@@ -230,6 +230,7 @@ export class SlackHandler {
         ...(parsed.approvalRequestId ? { approvalRequestId: parsed.approvalRequestId } : {}),
         ...(parsed.decision ? { decision: parsed.decision } : {}),
         ...(typeof parsed.limit === "number" ? { limit: parsed.limit } : {}),
+        correlationId,
       });
 
       const responseText = toApprovalSlackText(approvalResult);
@@ -287,6 +288,7 @@ export class SlackHandler {
       approvalResult = await runApprovalFromSlack({
         userId: identity.userId,
         operation: "list",
+        correlationId,
       });
     } else {
       if (!command.approvalRequestId || !command.decision) {
@@ -297,6 +299,7 @@ export class SlackHandler {
         operation: "respond",
         approvalRequestId: command.approvalRequestId,
         decision: command.decision,
+        correlationId,
       });
     }
 
@@ -335,6 +338,7 @@ export class SlackHandler {
       operation: "respond",
       approvalRequestId: event.approvalRequestId,
       decision,
+      correlationId,
     });
 
     const responseText = toApprovalSlackText(approvalResult);

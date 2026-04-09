@@ -214,7 +214,7 @@ async function runScanStale(args: ParsedArgs, correlationId: string): Promise<un
   });
 }
 
-async function runApprove(args: ParsedArgs): Promise<unknown> {
+async function runApprove(args: ParsedArgs, correlationId: string): Promise<unknown> {
   const { runApprovalFromCli } = await import("../agents/approval-agent.js");
   const userId = requireOption(args, "user-id");
 
@@ -224,6 +224,7 @@ async function runApprove(args: ParsedArgs): Promise<unknown> {
       userId,
       operation: "list",
       ...(typeof limit === "number" ? { limit } : {}),
+      correlationId,
     });
   }
 
@@ -239,6 +240,7 @@ async function runApprove(args: ParsedArgs): Promise<unknown> {
       operation: "respond",
       approvalRequestId: approvalRequestId.trim(),
       decision,
+      correlationId,
     });
   }
 
@@ -278,7 +280,7 @@ async function main(): Promise<void> {
       result = await runScanStale(args, correlationId);
       break;
     case "approve":
-      result = await runApprove(args);
+      result = await runApprove(args, correlationId);
       break;
     case "reset-session":
       result = await runResetSession(args);

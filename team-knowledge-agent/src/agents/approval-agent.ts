@@ -1,3 +1,10 @@
+import crypto from "node:crypto";
+import {
+  recordAuditEvent,
+  trackApprovalDecision,
+  trackApprovalRequest,
+  trackError,
+} from "../audit/audit-service.js";
 import {
   getApprovalRequest,
   listPendingApprovals,
@@ -20,6 +27,7 @@ export type ApprovalAgentRequest = {
   approvalRequestId?: string;
   decision?: ApprovalDecision;
   limit?: number;
+  correlationId?: string;
 };
 
 export type ApprovalAgentResult = {
@@ -169,62 +177,126 @@ function formatPendingApprovalSummary(pending: ApprovalRequestRecord[]): string 
 export async function runApprovalAgent(
   request: ApprovalAgentRequest,
 ): Promise<ApprovalAgentResult> {
-  if (request.operation === "list") {
-    const pending = await listPendingApprovals(request.limit ?? 20);
-    return {
-      operation: "list",
-      pendingApprovals: pending,
-      summary: formatPendingApprovalSummary(pending),
-    };
-  }
+  const traceId = request.correlationId ?? crypto.randomUUID();
 
-  if (request.operation === "respond") {
-    if (!request.approvalRequestId || !request.decision) {
-      throw new Error("Approval response requires approvalRequestId and decision.");
+  try {
+    if (request.operation === "list") {
+      const pending = await listPendingApprovals(request.limit ?? 20);
+      await recordAuditEvent({
+        eventType: "approval_list_accessed",
+        traceId,
+        userId: request.userId,
+        details: {
+          trigger: request.trigger,
+          limit: request.limit ?? 20,
+          count: pending.length,
+        },
+      });
+      return {
+        operation: "list",
+        pendingApprovals: pending,
+        summary: formatPendingApprovalSummary(pending),
+      };
     }
 
-    const updated = await respondToApprovalRequest({
-      approvalRequestId: request.approvalRequestId,
-      decision: request.decision,
-      approverId: request.userId,
+    if (request.operation === "respond") {
+      if (!request.approvalRequestId || !request.decision) {
+        throw new Error("Approval response requires approvalRequestId and decision.");
+      }
+
+      const updated = await respondToApprovalRequest({
+        approvalRequestId: request.approvalRequestId,
+        decision: request.decision,
+        approverId: request.userId,
+      });
+
+      await trackApprovalDecision({
+        traceId,
+        userId: request.userId,
+        approvalRequestId: updated.id,
+        decision: request.decision,
+        status: updated.status,
+        approverId: request.userId,
+        details: {
+          trigger: request.trigger,
+        },
+      });
+
+      const refreshed = await getApprovalRequest(updated.id);
+      return {
+        operation: "respond",
+        approvalRequest: refreshed ?? updated,
+        summary: `Approval request ${updated.id} is now ${updated.status}.`,
+      };
+    }
+
+    if (!request.action) {
+      throw new Error("Approval proposal requires an action payload.");
+    }
+
+    const proposal = await proposeActionForApproval({
+      userId: request.userId,
+      action: request.action,
     });
 
-    const refreshed = await getApprovalRequest(updated.id);
-    return {
-      operation: "respond",
-      approvalRequest: refreshed ?? updated,
-      summary: `Approval request ${updated.id} is now ${updated.status}.`,
-    };
-  }
+    if (!proposal.requiresApproval) {
+      await recordAuditEvent({
+        eventType: "approval_not_required",
+        traceId,
+        userId: request.userId,
+        details: {
+          trigger: request.trigger,
+          actionType: request.action.actionType,
+          riskLevel: proposal.assessment.riskLevel,
+          reasons: proposal.assessment.reasons,
+        },
+      });
+      return {
+        operation: "propose",
+        requiresApproval: false,
+        summary: "Action classified as low risk. Approval is not required.",
+      };
+    }
 
-  if (!request.action) {
-    throw new Error("Approval proposal requires an action payload.");
-  }
+    if (!proposal.approvalRequest || !proposal.payloads) {
+      throw new Error("Approval was required but request creation failed.");
+    }
 
-  const proposal = await proposeActionForApproval({
-    userId: request.userId,
-    action: request.action,
-  });
+    await trackApprovalRequest({
+      traceId,
+      userId: request.userId,
+      approvalRequestId: proposal.approvalRequest.id,
+      actionType: proposal.approvalRequest.actionType,
+      status: proposal.approvalRequest.status,
+      riskLevel: proposal.assessment.riskLevel,
+      details: {
+        trigger: request.trigger,
+        reasons: proposal.assessment.reasons,
+      },
+    });
 
-  if (!proposal.requiresApproval) {
     return {
       operation: "propose",
-      requiresApproval: false,
-      summary: "Action classified as low risk. Approval is not required.",
+      requiresApproval: true,
+      approvalRequest: proposal.approvalRequest,
+      payloads: proposal.payloads,
+      summary: `Approval request ${proposal.approvalRequest.id} created for ${proposal.approvalRequest.actionType}.`,
     };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await trackError({
+      traceId,
+      userId: request.userId,
+      scope: "approval-agent.runApprovalAgent",
+      message,
+      details: {
+        operation: request.operation,
+        trigger: request.trigger,
+        approvalRequestId: request.approvalRequestId ?? null,
+      },
+    });
+    throw error;
   }
-
-  if (!proposal.approvalRequest || !proposal.payloads) {
-    throw new Error("Approval was required but request creation failed.");
-  }
-
-  return {
-    operation: "propose",
-    requiresApproval: true,
-    approvalRequest: proposal.approvalRequest,
-    payloads: proposal.payloads,
-    summary: `Approval request ${proposal.approvalRequest.id} created for ${proposal.approvalRequest.actionType}.`,
-  };
 }
 
 export async function runApprovalFromApi(

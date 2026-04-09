@@ -62,6 +62,7 @@ export function registerApprovalsRoutes(app: Router): void {
         operation: "respond",
         approvalRequestId: parsed.data.approvalRequestId,
         decision: normalizeDecision(parsed.data.decision),
+        correlationId: context.correlationId,
       });
 
       const log = withBindings({

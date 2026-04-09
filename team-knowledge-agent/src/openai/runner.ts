@@ -1,5 +1,11 @@
 import crypto from "node:crypto";
 import {
+  recordAuditEvent,
+  trackAgentRun,
+  trackError,
+  trackHandoff,
+} from "../audit/audit-service.js";
+import {
   parseApprovalMessageToRequest,
   runApprovalAgent,
 } from "../agents/approval-agent.js";
@@ -15,7 +21,6 @@ import {
 } from "../agents/staleness-agent.js";
 import { parseWriteMessageToRequest, runWriteAgent } from "../agents/write-agent.js";
 import { withBindings } from "../config/logger.js";
-import { query } from "../db/postgres.js";
 import {
   loadOrCreateSession,
   resetSessionState,
@@ -89,9 +94,12 @@ const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
       specialistOutput: stalenessResult.summary,
     };
   },
-  approval: async ({ message, userId }) => {
+  approval: async ({ message, userId, correlationId }) => {
     const approvalRequest = parseApprovalMessageToRequest(userId, message);
-    const approvalResult = await runApprovalAgent(approvalRequest);
+    const approvalResult = await runApprovalAgent({
+      ...approvalRequest,
+      correlationId,
+    });
     return {
       specialistOutput: approvalResult.summary,
     };
@@ -107,21 +115,6 @@ const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
     };
   },
 };
-
-async function appendAuditEvent(
-  eventType: string,
-  traceId: string,
-  userId: string,
-  details: Record<string, unknown>,
-): Promise<void> {
-  await query(
-    `
-      INSERT INTO audit_events (event_type, trace_id, user_id, details_json)
-      VALUES ($1, $2, $3::uuid, $4::jsonb)
-    `,
-    [eventType, traceId, userId, JSON.stringify(details)],
-  );
-}
 
 export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
   const traceId = request.correlationId ?? crypto.randomUUID();
@@ -141,22 +134,38 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     request.conversationId,
   );
 
-  await appendAuditEvent("run_started", traceId, request.userId, {
+  await trackAgentRun({
+    phase: "started",
+    traceId,
+    userId: request.userId,
     conversationId: request.conversationId,
     sessionId,
-    message: request.message,
+    details: {
+      message: request.message,
+    },
   });
 
   try {
     const decision = await classifyRequest(request.message);
-    await appendAuditEvent("route_selected", traceId, request.userId, {
+    await recordAuditEvent({
+      eventType: "route_selected",
+      traceId,
+      userId: request.userId,
+      details: {
       route: decision.route,
       reason: decision.reason,
       modelRequestId: decision.modelRequestId,
+      },
     });
-    await appendAuditEvent("handoff_dispatched", traceId, request.userId, {
+    await trackHandoff({
+      phase: "dispatched",
+      traceId,
+      userId: request.userId,
       route: decision.route,
       handoffReason: decision.reason,
+      details: {
+        conversationId: request.conversationId,
+      },
     });
 
     const specialist = specialistHandlers[decision.route];
@@ -171,10 +180,15 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     const response = specialistResult.skipRouterSummary
       ? specialistResult.specialistOutput
       : await summarizeHandoff(decision.route, specialistResult.specialistOutput);
-    await appendAuditEvent("handoff_completed", traceId, request.userId, {
+    await trackHandoff({
+      phase: "completed",
+      traceId,
+      userId: request.userId,
       route: decision.route,
-      specialistOutputLength: specialistResult.specialistOutput.length,
       sourceReferenceCount: specialistResult.sourceReferences?.length ?? 0,
+      details: {
+        specialistOutputLength: specialistResult.specialistOutput.length,
+      },
     });
 
     const turns = Array.isArray(sessionState.turns) ? sessionState.turns : [];
@@ -200,10 +214,16 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
       sessionId,
       nextState,
     );
-    await appendAuditEvent("run_completed", traceId, request.userId, {
+    await trackAgentRun({
+      phase: "completed",
+      traceId,
+      userId: request.userId,
+      conversationId: request.conversationId,
       sessionId,
       route: decision.route,
-      sourceReferences: specialistResult.sourceReferences ?? [],
+      details: {
+        sourceReferences: specialistResult.sourceReferences ?? [],
+      },
     });
 
     log.info(
@@ -223,9 +243,23 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
       specialistOutput: specialistResult.specialistOutput,
     };
   } catch (error) {
-    await appendAuditEvent("run_failed", traceId, request.userId, {
+    const message = error instanceof Error ? error.message : String(error);
+    await trackAgentRun({
+      phase: "failed",
+      traceId,
+      userId: request.userId,
+      conversationId: request.conversationId,
       sessionId,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
+    });
+    await trackError({
+      traceId,
+      userId: request.userId,
+      scope: "openai.runner.runAgent",
+      message,
+      details: {
+        sessionId,
+      },
     });
     log.error({ err: error, sessionId }, "Agent run failed");
     throw error;
@@ -239,9 +273,14 @@ export async function resetAgentSession(
   const { sessionId, sessionState } = await resetSessionState(userId, conversationId);
   const traceId = crypto.randomUUID();
 
-  await appendAuditEvent("session_reset", traceId, userId, {
-    conversationId,
-    sessionId,
+  await recordAuditEvent({
+    eventType: "session_reset",
+    traceId,
+    userId,
+    details: {
+      conversationId,
+      sessionId,
+    },
   });
 
   return { sessionId, sessionState };

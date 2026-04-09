@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { trackError, trackToolCall } from "../audit/audit-service.js";
 import { getEnv } from "../config/env.js";
 import { withBindings } from "../config/logger.js";
 import { evaluateCivicToolCall } from "./guardrails.js";
@@ -101,6 +102,15 @@ export class CivicClient {
       },
       "Civic tool call requested",
     );
+    await trackToolCall({
+      status: "requested",
+      traceId: correlationId,
+      userId: call.userId,
+      toolName: call.toolName,
+      ...(decision.toolMode ? { mode: decision.toolMode } : {}),
+      profileId,
+      approved,
+    });
 
     if (!decision.allow || !decision.toolMode) {
       log.warn(
@@ -113,6 +123,26 @@ export class CivicClient {
         },
         "Civic tool call blocked by guardrails",
       );
+      await trackToolCall({
+        status: "blocked",
+        traceId: correlationId,
+        userId: call.userId,
+        toolName: call.toolName,
+        profileId,
+        approved,
+        reason: decision.reason,
+      });
+      await trackError({
+        traceId: correlationId,
+        userId: call.userId,
+        scope: "civic.client.callTool",
+        message: decision.reason,
+        details: {
+          toolName: call.toolName,
+          profileId,
+          approved,
+        },
+      });
       throw new Error(`Civic guardrail blocked tool call: ${decision.reason}`);
     }
 
@@ -134,6 +164,15 @@ export class CivicClient {
       },
       "Civic tool call allowed",
     );
+    await trackToolCall({
+      status: "allowed",
+      traceId: correlationId,
+      userId: call.userId,
+      toolName: call.toolName,
+      mode: decision.toolMode,
+      profileId,
+      approved,
+    });
 
     return {
       toolName: call.toolName,

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
+import { trackError, trackWriteExecution } from "../audit/audit-service.js";
 import { getCivicClient } from "../civic/client.js";
 import { withBindings } from "../config/logger.js";
-import { query } from "../db/postgres.js";
 import { getApprovalRequestById, type ApprovalRequestRecord } from "../approvals/approval-store.js";
 import { classifyActionRisk, detectWriteAction, type RiskActionInput } from "../policy/risk-classifier.js";
 
@@ -169,21 +169,6 @@ function parseTextMessage(message: string): ParsedMessage {
   };
 }
 
-async function appendWriteAuditEvent(input: {
-  eventType: string;
-  traceId: string;
-  userId: string;
-  details: Record<string, unknown>;
-}): Promise<void> {
-  await query(
-    `
-      INSERT INTO audit_events (event_type, trace_id, user_id, details_json)
-      VALUES ($1, $2, $3::uuid, $4::jsonb)
-    `,
-    [input.eventType, input.traceId, input.userId, JSON.stringify(input.details)],
-  );
-}
-
 async function resolveActionWithApprovalCheck(input: {
   approvalRequestId?: string;
   action?: WriteAction;
@@ -265,8 +250,8 @@ export async function runWriteAgent(request: WriteAgentRequest): Promise<WriteAg
   const requestId = crypto.randomUUID();
   const log = withBindings({ correlationId: traceId, requestId });
 
-  await appendWriteAuditEvent({
-    eventType: "write_execution_attempted",
+  await trackWriteExecution({
+    status: "attempted",
     traceId,
     userId: request.userId,
     details: {
@@ -306,14 +291,14 @@ export async function runWriteAgent(request: WriteAgentRequest): Promise<WriteAg
       requestId,
     });
 
-    await appendWriteAuditEvent({
-      eventType: "write_execution_succeeded",
+    await trackWriteExecution({
+      status: "succeeded",
       traceId,
       userId: request.userId,
+      approvalRequestId: approval.id,
+      actionType: action.actionType,
+      toolName: action.toolName,
       details: {
-        approvalRequestId: approval.id,
-        actionType: action.actionType,
-        toolName: action.toolName,
         mode: civicResult.mode,
         output: civicResult.output,
       },
@@ -338,13 +323,25 @@ export async function runWriteAgent(request: WriteAgentRequest): Promise<WriteAg
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await appendWriteAuditEvent({
-      eventType: "write_execution_blocked",
+    await trackWriteExecution({
+      status: "blocked",
       traceId,
       userId: request.userId,
+      approvalRequestId: request.approvalRequestId,
+      actionType: request.action?.actionType,
+      toolName: request.action?.toolName,
       details: {
-        approvalRequestId: request.approvalRequestId ?? null,
         error: message,
+      },
+    });
+    await trackError({
+      traceId,
+      userId: request.userId,
+      scope: "write-agent.runWriteAgent",
+      message,
+      details: {
+        trigger: request.trigger,
+        approvalRequestId: request.approvalRequestId ?? null,
       },
     });
 
