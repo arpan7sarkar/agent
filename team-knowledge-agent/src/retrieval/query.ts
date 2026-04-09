@@ -74,6 +74,21 @@ export type RetrievalQueryResult = {
   };
 };
 
+export type LiveSourceReadRequest = {
+  userId: string;
+  sourceType: RetrievalSourceType;
+  sourceId: string;
+  payload?: Record<string, unknown>;
+  fallbackContent?: string;
+  correlationId?: string;
+};
+
+export type LiveSourceReadResult = {
+  sourceType: RetrievalSourceType;
+  sourceId: string;
+  content: string;
+};
+
 type SourceDocumentRow = {
   id: string;
 };
@@ -146,6 +161,26 @@ async function fetchContentViaCivic(input: {
   throw new Error(
     `Civic tool ${toolName} returned no textual content. Provide contentFallback until remote MCP payload mapping is configured.`,
   );
+}
+
+export async function fetchLiveSourceDocument(
+  request: LiveSourceReadRequest,
+): Promise<LiveSourceReadResult> {
+  const correlationId = request.correlationId ?? crypto.randomUUID();
+  const content = await fetchContentViaCivic({
+    userId: request.userId,
+    sourceType: request.sourceType,
+    sourceId: request.sourceId,
+    ...(request.payload ? { payload: request.payload } : {}),
+    ...(request.fallbackContent ? { fallbackContent: request.fallbackContent } : {}),
+    correlationId,
+  });
+
+  return {
+    sourceType: request.sourceType,
+    sourceId: request.sourceId,
+    content,
+  };
 }
 
 function toIsoString(value?: string): string | undefined {
@@ -406,7 +441,7 @@ export async function queryKnowledge(
     };
   }
 
-  const liveReadContent = await fetchContentViaCivic({
+  const liveReadResult = await fetchLiveSourceDocument({
     userId: options.userId,
     sourceType: options.liveReadSource.sourceType,
     sourceId: options.liveReadSource.sourceId,
@@ -421,9 +456,9 @@ export async function queryKnowledge(
     matches,
     ...(eventualConsistencyWarning ? { eventualConsistencyWarning } : {}),
     liveRead: {
-      sourceType: options.liveReadSource.sourceType,
-      sourceId: options.liveReadSource.sourceId,
-      content: liveReadContent,
+      sourceType: liveReadResult.sourceType,
+      sourceId: liveReadResult.sourceId,
+      content: liveReadResult.content,
     },
   };
 }

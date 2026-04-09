@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { classifyRequest, summarizeHandoff, type RouterRoute } from "../agents/router-agent.js";
+import { runQaAgent, type QaSourceReference } from "../agents/qa-agent.js";
 import { withBindings } from "../config/logger.js";
 import { query } from "../db/postgres.js";
 import {
@@ -26,23 +27,54 @@ export type AgentRunResult = {
 };
 
 type SpecialistContext = {
+  userId: string;
+  conversationId: string;
+  correlationId: string;
   message: string;
   sessionState: SessionState;
 };
 
-type SpecialistHandler = (context: SpecialistContext) => Promise<string>;
+type SpecialistResult = {
+  specialistOutput: string;
+  skipRouterSummary?: boolean;
+  sourceReferences?: QaSourceReference[];
+};
+
+type SpecialistHandler = (context: SpecialistContext) => Promise<SpecialistResult>;
 
 const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
-  qa: async ({ message }) =>
-    `QA specialist placeholder: received question "${message}". Retrieval flow will be added in later steps.`,
+  qa: async ({ message, userId, correlationId }) => {
+    const qaResult = await runQaAgent({
+      userId,
+      question: message,
+      correlationId,
+    });
+    return {
+      specialistOutput: qaResult.answer,
+      skipRouterSummary: true,
+      sourceReferences: qaResult.sourceReferences,
+    };
+  },
   indexer: async () =>
-    "Indexer specialist placeholder: indexing pipeline is not wired yet, but routing is functioning.",
+    ({
+      specialistOutput:
+        "Indexer specialist placeholder: indexing pipeline is not wired yet, but routing is functioning.",
+    }),
   staleness: async () =>
-    "Staleness specialist placeholder: stale-doc analysis flow will be added in later steps.",
+    ({
+      specialistOutput:
+        "Staleness specialist placeholder: stale-doc analysis flow will be added in later steps.",
+    }),
   approval: async () =>
-    "Approval specialist placeholder: durable approval flow will be added in later steps.",
+    ({
+      specialistOutput:
+        "Approval specialist placeholder: durable approval flow will be added in later steps.",
+    }),
   write: async () =>
-    "Write specialist placeholder: write execution is blocked until approval flow is implemented.",
+    ({
+      specialistOutput:
+        "Write specialist placeholder: write execution is blocked until approval flow is implemented.",
+    }),
 };
 
 async function appendAuditEvent(
@@ -93,12 +125,17 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     });
 
     const specialist = specialistHandlers[decision.route];
-    const specialistOutput = await specialist({
+    const specialistResult = await specialist({
+      userId: request.userId,
+      conversationId: request.conversationId,
+      correlationId: traceId,
       message: request.message,
       sessionState,
     });
 
-    const response = await summarizeHandoff(decision.route, specialistOutput);
+    const response = specialistResult.skipRouterSummary
+      ? specialistResult.specialistOutput
+      : await summarizeHandoff(decision.route, specialistResult.specialistOutput);
 
     const turns = Array.isArray(sessionState.turns) ? sessionState.turns : [];
     const nextState: SessionState = {
@@ -126,16 +163,24 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     await appendAuditEvent("run_completed", traceId, request.userId, {
       sessionId,
       route: decision.route,
+      sourceReferences: specialistResult.sourceReferences ?? [],
     });
 
-    log.info({ sessionId, route: decision.route }, "Agent run completed");
+    log.info(
+      {
+        sessionId,
+        route: decision.route,
+        sourceReferenceCount: specialistResult.sourceReferences?.length ?? 0,
+      },
+      "Agent run completed",
+    );
 
     return {
       traceId,
       sessionId,
       route: decision.route,
       response,
-      specialistOutput,
+      specialistOutput: specialistResult.specialistOutput,
     };
   } catch (error) {
     await appendAuditEvent("run_failed", traceId, request.userId, {
