@@ -9,6 +9,7 @@ const envSchema = z
 
     OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
     OPENAI_MODEL: z.string().min(1).default("gpt-5.2"),
+    OPENAI_EMBEDDING_MODEL: z.string().min(1).default("text-embedding-3-large"),
 
     CIVIC_TOKEN: z.string().min(1, "CIVIC_TOKEN is required"),
     CIVIC_PROFILE_ID: z.string().min(1, "CIVIC_PROFILE_ID is required"),
@@ -22,6 +23,7 @@ const envSchema = z
 
     PINECONE_API_KEY: z.string().min(1, "PINECONE_API_KEY is required"),
     PINECONE_INDEX: z.string().min(1, "PINECONE_INDEX is required"),
+    PINECONE_NAMESPACE: z.string().optional(),
 
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
