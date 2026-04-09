@@ -13,6 +13,7 @@ import {
   parseStalenessMessageToRequest,
   runStalenessAgent,
 } from "../agents/staleness-agent.js";
+import { parseWriteMessageToRequest, runWriteAgent } from "../agents/write-agent.js";
 import { withBindings } from "../config/logger.js";
 import { query } from "../db/postgres.js";
 import {
@@ -95,11 +96,16 @@ const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
       specialistOutput: approvalResult.summary,
     };
   },
-  write: async () =>
-    ({
-      specialistOutput:
-        "Write specialist placeholder: write execution is blocked until approval flow is implemented.",
-    }),
+  write: async ({ message, userId, correlationId }) => {
+    const writeRequest = parseWriteMessageToRequest(userId, message);
+    const writeResult = await runWriteAgent({
+      ...writeRequest,
+      correlationId,
+    });
+    return {
+      specialistOutput: writeResult.summary,
+    };
+  },
 };
 
 async function appendAuditEvent(

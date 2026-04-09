@@ -1,4 +1,4 @@
-import { getEnv } from "../config/env.js";
+import { classifyActionRisk } from "../policy/risk-classifier.js";
 import {
   createApprovalRequest,
   getApprovalRequestById,
@@ -45,84 +45,12 @@ function getString(payload: Record<string, unknown>, key: string): string | null
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function isDocumentUpdate(action: ProposedAction): boolean {
-  const actionKey = action.actionType.toLowerCase();
-  const toolName = (action.toolName ?? "").toLowerCase();
-  if (toolName === "notion.update_page") return true;
-
-  return (
-    actionKey.includes("document_update") ||
-    actionKey.includes("doc_update") ||
-    actionKey.includes("rewrite_doc") ||
-    actionKey.includes("update_page")
-  );
-}
-
-function isExternalWriteAction(action: ProposedAction): boolean {
-  const actionKey = action.actionType.toLowerCase();
-  const toolName = (action.toolName ?? "").toLowerCase();
-  const writeHints = ["write", "update", "create", "delete", "publish", "post", "apply"];
-
-  if (toolName.length > 0 && !toolName.includes("get_") && !toolName.includes("search_")) {
-    return writeHints.some((hint) => toolName.includes(hint));
-  }
-
-  return writeHints.some((hint) => actionKey.includes(hint));
-}
-
-function isSlackWriteOutsideAllowedPath(action: ProposedAction): boolean {
-  const toolName = (action.toolName ?? "").toLowerCase();
-  const actionKey = action.actionType.toLowerCase();
-  const isSlackWrite =
-    toolName === "slack.post_message" ||
-    actionKey.includes("slack_write") ||
-    actionKey.includes("slack_post");
-
-  if (!isSlackWrite) return false;
-
-  const env = getEnv();
-  const allowedChannel = env.CIVIC_SLACK_WRITE_CHANNEL;
-  if (!allowedChannel) {
-    return true;
-  }
-
-  const payloadChannel = getString(action.payload, "channel_id") ?? getString(action.payload, "channel");
-  return payloadChannel !== allowedChannel;
-}
-
 function buildRiskAssessment(action: ProposedAction): RiskAssessment {
-  const reasons: string[] = [];
-
-  if (isDocumentUpdate(action)) {
-    reasons.push("Document update operations require human approval.");
-  }
-
-  if (isSlackWriteOutsideAllowedPath(action)) {
-    reasons.push("Slack write targets a channel outside the approved path.");
-  }
-
-  if (isExternalWriteAction(action)) {
-    reasons.push("External write action may change system state and must be reviewed.");
-  }
-
-  const requiresApproval = reasons.length > 0;
-  if (!requiresApproval) {
-    return {
-      requiresApproval: false,
-      reasons: ["Action appears read-only and low risk."],
-      riskLevel: "low",
-    };
-  }
-
-  const riskLevel =
-    reasons.length >= 2 || reasons.some((reason) => reason.includes("outside the approved path"))
-      ? "high"
-      : "medium";
-
+  const classified = classifyActionRisk(action);
   return {
-    requiresApproval: true,
-    reasons,
-    riskLevel,
+    requiresApproval: classified.requiresApproval,
+    reasons: classified.reasons,
+    riskLevel: classified.riskLevel,
   };
 }
 
@@ -210,4 +138,3 @@ export async function listPendingApprovals(limit = 20): Promise<ApprovalRequestR
     limit,
   });
 }
-
