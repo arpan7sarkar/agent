@@ -109,6 +109,10 @@ function mapSourceTypeToReadTool(sourceType: RetrievalSourceType): string {
       return "slack.get_channel_history";
     case "notion":
       return "notion.get_page";
+    case "jira":
+      return "jira.get_issue";
+    case "gmail":
+      return "gmail.get_thread";
     default:
       throw new Error(`Unsupported source type: ${sourceType}`);
   }

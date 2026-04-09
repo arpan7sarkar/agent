@@ -1,4 +1,10 @@
-export type CivicToolSource = "github" | "google_drive" | "slack" | "notion";
+export type CivicToolSource =
+  | "github"
+  | "google_drive"
+  | "slack"
+  | "notion"
+  | "jira"
+  | "gmail";
 export type CivicToolMode = "read" | "write";
 
 export type CivicToolDefinition = {
@@ -16,6 +22,8 @@ export type CivicToolRegistry = Map<string, CivicToolDefinition>;
 export type CivicToolRegistryOptions = {
   slackWriteChannelId?: string;
   notionWritePageIds?: string[];
+  jiraProjectKeys?: string[];
+  gmailLabelIds?: string[];
 };
 
 function uniqueNonEmpty(values: string[]): string[] {
@@ -87,6 +95,34 @@ export function buildCivicToolRegistry(
       source: "notion",
       mode: "read",
       description: "Read Notion page contents for QA and indexing.",
+      requiresApproval: false,
+    },
+    {
+      name: "jira.search_issues",
+      source: "jira",
+      mode: "read",
+      description: "Search Jira issues and metadata for team knowledge retrieval.",
+      requiresApproval: false,
+    },
+    {
+      name: "jira.get_issue",
+      source: "jira",
+      mode: "read",
+      description: "Read Jira issue details for grounding and status checks.",
+      requiresApproval: false,
+    },
+    {
+      name: "gmail.search_threads",
+      source: "gmail",
+      mode: "read",
+      description: "Search Gmail threads for historical communication context.",
+      requiresApproval: false,
+    },
+    {
+      name: "gmail.get_thread",
+      source: "gmail",
+      mode: "read",
+      description: "Read Gmail thread content for retrieval and QA.",
       requiresApproval: false,
     },
   ];

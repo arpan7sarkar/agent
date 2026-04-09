@@ -71,6 +71,8 @@ const VALID_SOURCE_TYPES: RetrievalSourceType[] = [
   "google_drive",
   "slack",
   "notion",
+  "jira",
+  "gmail",
 ];
 
 function isRetrievalSourceType(value: string): value is RetrievalSourceType {

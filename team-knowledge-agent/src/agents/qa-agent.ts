@@ -133,7 +133,12 @@ function pickLiveSourceCandidates(references: QaSourceReference[]): Array<{
   for (const reference of references) {
     if (!reference.sourceType || !reference.sourceId) continue;
     const type = reference.sourceType as RetrievalSourceType;
-    if (!["github", "google_drive", "slack", "notion"].includes(type)) continue;
+    if (
+      !["github", "google_drive", "slack", "notion", "jira", "gmail"].includes(
+        type,
+      )
+    )
+      continue;
 
     const key = `${type}:${reference.sourceId}`;
     if (seen.has(key)) continue;

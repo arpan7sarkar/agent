@@ -17,12 +17,21 @@ type AuthenticatedApiContext = {
 
 const indexRequestSchema = z.object({
   mode: z.enum(["single", "incremental_refresh", "full_reindex"]),
-  sourceTypes: z.array(z.enum(["github", "google_drive", "slack", "notion"])).optional(),
+  sourceTypes: z
+    .array(z.enum(["github", "google_drive", "slack", "notion", "jira", "gmail"]))
+    .optional(),
   namespace: z.string().optional(),
   items: z
     .array(
       z.object({
-        sourceType: z.enum(["github", "google_drive", "slack", "notion"]),
+        sourceType: z.enum([
+          "github",
+          "google_drive",
+          "slack",
+          "notion",
+          "jira",
+          "gmail",
+        ]),
         sourceId: z.string().min(1),
         sourceUrl: z.string().optional(),
         title: z.string().optional(),

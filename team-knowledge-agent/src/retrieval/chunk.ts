@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 
-export type RetrievalSourceType = "github" | "google_drive" | "slack" | "notion";
+export type RetrievalSourceType =
+  | "github"
+  | "google_drive"
+  | "slack"
+  | "notion"
+  | "jira"
+  | "gmail";
 
 export type SourceDocumentInput = {
   sourceType: RetrievalSourceType;
@@ -147,4 +153,3 @@ export function prepareDocumentForIndexing(
     chunks,
   };
 }
-

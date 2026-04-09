@@ -190,12 +190,16 @@ export function getCivicClient(): CivicClient {
 
   const env = getEnv();
   const notionWritePageIds = parseCsvList(env.CIVIC_NOTION_WRITE_PAGE_IDS);
+  const jiraProjectKeys = parseCsvList(env.CIVIC_JIRA_PROJECT_KEYS);
+  const gmailLabelIds = parseCsvList(env.CIVIC_GMAIL_LABEL_IDS);
 
   const registry = buildCivicToolRegistry({
     ...(env.CIVIC_SLACK_WRITE_CHANNEL
       ? { slackWriteChannelId: env.CIVIC_SLACK_WRITE_CHANNEL }
       : {}),
     ...(notionWritePageIds.length > 0 ? { notionWritePageIds } : {}),
+    ...(jiraProjectKeys.length > 0 ? { jiraProjectKeys } : {}),
+    ...(gmailLabelIds.length > 0 ? { gmailLabelIds } : {}),
   });
 
   cachedClient = new CivicClient({

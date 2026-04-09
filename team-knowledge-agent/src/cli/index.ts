@@ -7,7 +7,21 @@ type ParsedArgs = {
   positionals: string[];
 };
 
-const SOURCE_TYPES = new Set(["github", "google_drive", "slack", "notion"]);
+const SOURCE_TYPES = new Set([
+  "github",
+  "google_drive",
+  "slack",
+  "notion",
+  "jira",
+  "gmail",
+]);
+type SupportedSourceType =
+  | "github"
+  | "google_drive"
+  | "slack"
+  | "notion"
+  | "jira"
+  | "gmail";
 const INDEX_MODES = new Set(["single", "incremental_refresh", "full_reindex"]);
 const DECISION_MAP: Record<string, "approved" | "rejected"> = {
   approve: "approved",
@@ -67,14 +81,14 @@ function optionalCsv(value: string | undefined): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
-function asSourceTypes(values: string[] | undefined): Array<"github" | "google_drive" | "slack" | "notion"> | undefined {
+function asSourceTypes(values: string[] | undefined): SupportedSourceType[] | undefined {
   if (!values || values.length === 0) return undefined;
-  const parsed: Array<"github" | "google_drive" | "slack" | "notion"> = [];
+  const parsed: SupportedSourceType[] = [];
   for (const value of values) {
     if (!SOURCE_TYPES.has(value)) {
       throw new Error(`Invalid source type: ${value}.`);
     }
-    parsed.push(value as "github" | "google_drive" | "slack" | "notion");
+    parsed.push(value as SupportedSourceType);
   }
   return parsed;
 }
@@ -98,7 +112,7 @@ Usage:
   agent reset-session --user-id <uuid> --conversation-id <uuid>
 
 Index options:
-  --source-type <github|google_drive|slack|notion>   (single mode)
+  --source-type <github|google_drive|slack|notion|jira|gmail>   (single mode)
   --source-id <id>                                    (single mode)
   --source-url <url>                                  (single mode, optional)
   --namespace <name>                                  (optional)
@@ -177,7 +191,7 @@ async function runIndex(args: ParsedArgs, correlationId: string): Promise<unknow
       mode: "single",
       items: [
         {
-          sourceType: sourceType as "github" | "google_drive" | "slack" | "notion",
+          sourceType: sourceType as SupportedSourceType,
           sourceId,
           ...(args.options["source-url"] ? { sourceUrl: args.options["source-url"] } : {}),
           ...(args.flags.has("force") ? { force: true } : {}),

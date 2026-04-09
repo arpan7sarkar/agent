@@ -58,6 +58,8 @@ const VALID_SOURCE_TYPES: RetrievalSourceType[] = [
   "google_drive",
   "slack",
   "notion",
+  "jira",
+  "gmail",
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;

@@ -20,6 +20,8 @@ const envSchema = z
       .transform((value) => value !== "false"),
     CIVIC_SLACK_WRITE_CHANNEL: z.string().optional(),
     CIVIC_NOTION_WRITE_PAGE_IDS: z.string().optional(),
+    CIVIC_JIRA_PROJECT_KEYS: z.string().optional(),
+    CIVIC_GMAIL_LABEL_IDS: z.string().optional(),
 
     PINECONE_API_KEY: z.string().min(1, "PINECONE_API_KEY is required"),
     PINECONE_INDEX: z.string().min(1, "PINECONE_INDEX is required"),

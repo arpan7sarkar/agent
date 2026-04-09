@@ -17,7 +17,9 @@ type AuthenticatedApiContext = {
 
 const stalenessRequestSchema = z.object({
   documentIds: z.array(z.string().uuid()).optional(),
-  sourceTypes: z.array(z.enum(["github", "google_drive", "slack", "notion"])).optional(),
+  sourceTypes: z
+    .array(z.enum(["github", "google_drive", "slack", "notion", "jira", "gmail"]))
+    .optional(),
   limit: z.number().int().positive().max(500).optional(),
   includeRewriteDraft: z.boolean().optional(),
 });
