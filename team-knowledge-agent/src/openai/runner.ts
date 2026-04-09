@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  parseIndexerMessageToRequest,
+  runIndexerAgent,
+} from "../agents/indexer-agent.js";
 import { classifyRequest, summarizeHandoff, type RouterRoute } from "../agents/router-agent.js";
 import { runQaAgent, type QaSourceReference } from "../agents/qa-agent.js";
 import { withBindings } from "../config/logger.js";
@@ -55,11 +59,17 @@ const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
       sourceReferences: qaResult.sourceReferences,
     };
   },
-  indexer: async () =>
-    ({
-      specialistOutput:
-        "Indexer specialist placeholder: indexing pipeline is not wired yet, but routing is functioning.",
-    }),
+  indexer: async ({ message, userId, correlationId }) => {
+    const indexerRequest = parseIndexerMessageToRequest(userId, message);
+    const indexerResult = await runIndexerAgent({
+      ...indexerRequest,
+      correlationId,
+    });
+
+    return {
+      specialistOutput: indexerResult.summary,
+    };
+  },
   staleness: async () =>
     ({
       specialistOutput:
