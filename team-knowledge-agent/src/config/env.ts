@@ -21,7 +21,7 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(3000),
     LOG_LEVEL: z.string().optional(),
   })
-  .strict();
+  .passthrough();
 
 export type AppEnv = z.infer<typeof envSchema>;
 
@@ -48,4 +48,3 @@ export function getEnv(): AppEnv {
   cachedEnv = parsed.data;
   return cachedEnv;
 }
-
