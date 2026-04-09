@@ -29,7 +29,8 @@ const baseSchemaStatements: string[] = [
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, conversation_id)
   );
   `,
   `
@@ -119,4 +120,3 @@ export async function initBaseSchemaWithClient(client: PoolClient): Promise<void
     await client.query(statement);
   }
 }
-

@@ -1,7 +1,13 @@
 import crypto from "node:crypto";
 import { classifyRequest, summarizeHandoff, type RouterRoute } from "../agents/router-agent.js";
 import { withBindings } from "../config/logger.js";
-import { query, withTransaction } from "../db/postgres.js";
+import { query } from "../db/postgres.js";
+import {
+  loadOrCreateSession,
+  resetSessionState,
+  saveSessionState,
+  type SessionState,
+} from "../sessions/session-store.js";
 
 export type AgentRequest = {
   userId: string;
@@ -9,25 +15,6 @@ export type AgentRequest = {
   message: string;
   requestId?: string;
   correlationId?: string;
-};
-
-type SessionRow = {
-  id: string;
-  state_json: SessionState;
-};
-
-type SessionTurn = {
-  at: string;
-  route: RouterRoute;
-  userMessage: string;
-  agentResponse: string;
-};
-
-type SessionState = {
-  lastRoute?: RouterRoute;
-  lastUserMessage?: string;
-  lastAgentResponse?: string;
-  turns?: SessionTurn[];
 };
 
 export type AgentRunResult = {
@@ -73,87 +60,6 @@ async function appendAuditEvent(
   );
 }
 
-function firstRowOrThrow<T>(rows: T[], message: string): T {
-  const row = rows[0];
-  if (!row) {
-    throw new Error(message);
-  }
-  return row;
-}
-
-async function ensureUserAndConversation(userId: string, conversationId: string): Promise<void> {
-  await withTransaction(async (client) => {
-    await client.query(
-      `
-        INSERT INTO users (id)
-        VALUES ($1::uuid)
-        ON CONFLICT (id) DO NOTHING
-      `,
-      [userId],
-    );
-
-    await client.query(
-      `
-        INSERT INTO conversations (id, user_id)
-        VALUES ($1::uuid, $2::uuid)
-        ON CONFLICT (id) DO UPDATE
-        SET user_id = EXCLUDED.user_id, updated_at = NOW()
-      `,
-      [conversationId, userId],
-    );
-  });
-}
-
-async function loadOrCreateSession(
-  userId: string,
-  conversationId: string,
-): Promise<{ sessionId: string; sessionState: SessionState }> {
-  const existing = await query<SessionRow>(
-    `
-      SELECT id, state_json
-      FROM sessions
-      WHERE user_id = $1::uuid AND conversation_id = $2::uuid
-      LIMIT 1
-    `,
-    [userId, conversationId],
-  );
-
-  if (existing.rows.length > 0) {
-    const row = firstRowOrThrow(existing.rows, "Expected existing session row");
-    return {
-      sessionId: row.id,
-      sessionState: row.state_json ?? {},
-    };
-  }
-
-  const created = await query<SessionRow>(
-    `
-      INSERT INTO sessions (user_id, conversation_id, state_json, updated_at)
-      VALUES ($1::uuid, $2::uuid, '{}'::jsonb, NOW())
-      RETURNING id, state_json
-    `,
-    [userId, conversationId],
-  );
-
-  const row = firstRowOrThrow(created.rows, "Failed to create session row");
-  return { sessionId: row.id, sessionState: row.state_json ?? {} };
-}
-
-async function saveSession(
-  sessionId: string,
-  sessionState: SessionState,
-): Promise<void> {
-  await query(
-    `
-      UPDATE sessions
-      SET state_json = $2::jsonb,
-          updated_at = NOW()
-      WHERE id = $1::uuid
-    `,
-    [sessionId, JSON.stringify(sessionState)],
-  );
-}
-
 export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
   const traceId = request.correlationId ?? crypto.randomUUID();
   const requestId = request.requestId ?? crypto.randomUUID();
@@ -167,7 +73,6 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     "Agent run started",
   );
 
-  await ensureUserAndConversation(request.userId, request.conversationId);
   const { sessionId, sessionState } = await loadOrCreateSession(
     request.userId,
     request.conversationId,
@@ -212,7 +117,12 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
       ].slice(-20),
     };
 
-    await saveSession(sessionId, nextState);
+    await saveSessionState(
+      request.userId,
+      request.conversationId,
+      sessionId,
+      nextState,
+    );
     await appendAuditEvent("run_completed", traceId, request.userId, {
       sessionId,
       route: decision.route,
@@ -235,4 +145,19 @@ export async function runAgent(request: AgentRequest): Promise<AgentRunResult> {
     log.error({ err: error, sessionId }, "Agent run failed");
     throw error;
   }
+}
+
+export async function resetAgentSession(
+  userId: string,
+  conversationId: string,
+): Promise<{ sessionId: string; sessionState: SessionState }> {
+  const { sessionId, sessionState } = await resetSessionState(userId, conversationId);
+  const traceId = crypto.randomUUID();
+
+  await appendAuditEvent("session_reset", traceId, userId, {
+    conversationId,
+    sessionId,
+  });
+
+  return { sessionId, sessionState };
 }
