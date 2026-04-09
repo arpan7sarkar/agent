@@ -5,6 +5,10 @@ import {
 } from "../agents/indexer-agent.js";
 import { classifyRequest, summarizeHandoff, type RouterRoute } from "../agents/router-agent.js";
 import { runQaAgent, type QaSourceReference } from "../agents/qa-agent.js";
+import {
+  parseStalenessMessageToRequest,
+  runStalenessAgent,
+} from "../agents/staleness-agent.js";
 import { withBindings } from "../config/logger.js";
 import { query } from "../db/postgres.js";
 import {
@@ -70,11 +74,16 @@ const specialistHandlers: Record<RouterRoute, SpecialistHandler> = {
       specialistOutput: indexerResult.summary,
     };
   },
-  staleness: async () =>
-    ({
-      specialistOutput:
-        "Staleness specialist placeholder: stale-doc analysis flow will be added in later steps.",
-    }),
+  staleness: async ({ message, userId, correlationId }) => {
+    const stalenessRequest = parseStalenessMessageToRequest(userId, message);
+    const stalenessResult = await runStalenessAgent({
+      ...stalenessRequest,
+      correlationId,
+    });
+    return {
+      specialistOutput: stalenessResult.summary,
+    };
+  },
   approval: async () =>
     ({
       specialistOutput:
